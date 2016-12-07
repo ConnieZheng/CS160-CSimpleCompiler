@@ -1,0 +1,351 @@
+%{
+    #include <cstdio>
+    #include <cstdlib>
+
+    #include "ast.hpp"
+    #include "primitive.hpp"
+    #include "symtab.hpp"
+
+    #define YYDEBUG 1
+
+    extern Program_ptr ast;
+    int yylex(void);
+    void yyerror(const char *);
+%}
+
+/* Enables verbose error messages */
+%error-verbose
+
+/** WRITE ME:
+ *  - Put all your token definitions here
+ *  - Put all your type definitions here
+ *  - Put all your precedence/associativity rules here
+ */
+
+/*%token USELESS*/
+%right ASSIGN
+%left OR
+%left AND
+%left EQL NOTEQL
+%left SML SMLEQL LRG LRGEQL
+%left ADD SUB
+%left MUL DIV
+%right NOT DEREF ADDR
+
+%token BOOLEAN CHAR INTEGER INTPTR CHARPTR STRING IF ELSE WHILE VAR PROCEDURE RETURN NULL_
+%token TF CHAR_LITERAL STRING_LITERAL IDENTIFIER INTEGER_LITERAL
+%start program
+
+%%
+
+/*all : USELESS;*/
+/*A program is composed of many procedures*/
+program:    procedures  
+            {
+                ast = new ProgramImpl($1.u_proc_list);   
+            }
+            ;
+
+procedures: procedures procedure
+            {
+                ($1.u_proc_list)->push_back($2.u_proc);
+                $$ = $1;
+            }
+            |procedure
+            {
+                $$.u_proc_list=new std::list<Proc_ptr>();
+                ($$.u_proc_list)->push_back($1.u_proc);
+            } 
+            ;
+
+procedure:  PROCEDURE IDENTIFIER '(' para_list ')' RETURN type '{' proc_body '}'
+            {
+                $$.u_proc=new ProcImpl(new SymName($2.u_base_charptr), $4.u_decl_list, $7.u_type, $9.u_procedure_block);
+            }
+            ;
+
+para_list:  /*empty*/
+            {
+                $$.u_decl_list=new std::list<Decl_ptr>();
+            }
+            |para_list_
+            {
+                $$=$1;
+            }
+            ;
+
+para_list_: para_list_ ';' id_list ':' type
+            {
+                ($1.u_decl_list)->push_back(new DeclImpl($3.u_symname_list,$5.u_type));
+                $$=$1;
+            }
+            |id_list ':' type
+            {
+                $$.u_decl_list=new std::list<Decl_ptr>();
+                ($$.u_decl_list)->push_back(new DeclImpl($1.u_symname_list,$3.u_type));
+            }
+            ;
+
+id_list:    id_list ',' IDENTIFIER
+            {
+                ($1.u_symname_list)->push_back(new SymName($3.u_base_charptr));
+                $$=$1;
+            }
+            |IDENTIFIER
+            {
+                $$.u_symname_list=new std::list<SymName_ptr>();
+                ($$.u_symname_list)->push_back(new SymName($1.u_base_charptr));
+            }
+            ;
+
+type:   BOOLEAN
+        {
+            $$.u_type = new TBoolean();
+        }
+        |CHAR
+        {
+            $$.u_type = new TCharacter();
+        }
+        |CHARPTR
+        {
+            $$.u_type = new TCharPtr();
+        }
+        |INTEGER
+        {
+            $$.u_type = new TInteger();
+        }
+        |INTPTR
+        {
+            $$.u_type = new TIntPtr();
+        }
+        ;/*5 types*/
+
+proc_body:  proc_list var_list statement_list RETURN expression ';'
+            {
+                $$.u_procedure_block=new Procedure_blockImpl($1.u_proc_list,$2.u_decl_list,$3.u_stat_list,new Return($5.u_expr));
+            }
+            ;
+
+proc_list:  /*empty*/
+            {
+                $$.u_proc_list=new std::list<Proc_ptr>();
+            }
+            |proc_list procedure
+            {
+                ($1.u_proc_list)->push_back($2.u_proc);
+                $$=$1;
+            }
+            ;
+
+var_list:   /*empty*/
+            {
+                $$.u_decl_list=new std::list<Decl_ptr>();
+            }
+            |var_list VAR id_list ':' type ';'
+            {
+                ($1.u_decl_list)->push_back(new DeclImpl($3.u_symname_list,$5.u_type));
+                $$ = $1;
+            }
+            |var_list VAR id_list ':' STRING '[' INTEGER_LITERAL ']' ';'
+            {
+                ($1.u_decl_list)->push_back(new DeclImpl($3.u_symname_list,new TString(new Primitive($7.u_base_int))));
+                $$ = $1;
+            }
+            ;
+
+statement_list: /*empty*/
+                {
+                    $$.u_stat_list=new std::list<Stat_ptr>();
+                }
+                |statement_list statement
+                {
+                    ($1.u_stat_list)->push_back($2.u_stat);
+                    $$=$1;
+                }
+                ;
+
+statement:  lhs ASSIGN expression ';'
+            {
+                $$.u_stat=new Assignment($1.u_lhs,$3.u_expr);
+            }
+            |lhs ASSIGN STRING_LITERAL ';'
+            {
+                $$.u_stat=new StringAssignment($1.u_lhs,new StringPrimitive($3.u_base_charptr));
+            }
+            |lhs ASSIGN IDENTIFIER '(' expression_list ')' ';' /*function call*/
+            {
+                $$.u_stat=new Call($1.u_lhs,new SymName($3.u_base_charptr),$5.u_expr_list);
+            }
+            |IF '(' expression ')' '{' nested_block '}'
+            {
+                $$.u_stat=new IfNoElse($3.u_expr,$6.u_nested_block);
+            }
+            |IF '(' expression ')'  '{' nested_block '}' ELSE '{' nested_block '}'
+            {
+                $$.u_stat=new IfWithElse($3.u_expr,$6.u_nested_block,$10.u_nested_block);
+            }
+            |WHILE '(' expression ')' '{' nested_block '}'
+            {
+                $$.u_stat=new WhileLoop($3.u_expr,$6.u_nested_block);
+            }
+            |'{' nested_block '}'
+            {
+                $$.u_stat=new CodeBlock($2.u_nested_block);
+            }
+            ;
+
+nested_block:   var_list statement_list
+                {
+                    $$.u_nested_block=new Nested_blockImpl($1.u_decl_list,$2.u_stat_list);
+                };
+
+expression_list:    /*empty*/
+                    {
+                        $$.u_expr_list=new std::list<Expr_ptr>();
+                    }
+                    |expression_list_
+                    {
+                        $$=$1;
+                    }
+                    ;
+
+expression_list_:   expression_list_',' expression
+                    {
+                        ($1.u_expr_list)->push_back($3.u_expr);
+                        $$=$1;
+                    }
+                    |expression
+                    {
+                        $$.u_expr_list=new std::list<Expr_ptr>();
+                        ($$.u_expr_list)->push_back($1.u_expr);
+                    }
+                    ;
+
+lhs:    IDENTIFIER
+        {
+            $$.u_lhs=new Variable(new SymName($1.u_base_charptr));
+        }
+        |IDENTIFIER '[' expression ']'
+        {
+            $$.u_lhs=new ArrayElement(new SymName($1.u_base_charptr),$3.u_expr);
+        }
+        |DEREF IDENTIFIER
+        {
+            $$.u_lhs=new DerefVariable(new SymName($2.u_base_charptr));
+        }
+        ;
+
+expression: NOT expression
+            {
+                $$.u_expr=new Not($2.u_expr);
+            }
+            |DEREF expression
+            {
+                $$.u_expr=new Deref($2.u_expr);
+            }
+            |ADDR lhs
+            {
+                $$.u_expr=new AddressOf($2.u_lhs);
+            }
+            |ADD expression %prec NOT
+            {
+                $$.u_expr=$2.u_expr;
+            }
+            |SUB expression %prec NOT
+            {
+                $$.u_expr=new Uminus($2.u_expr);
+            }
+            |expression AND expression
+            {
+                $$.u_expr=new And($1.u_expr,$3.u_expr);
+            }
+            |expression OR expression
+            {
+                $$.u_expr=new Or($1.u_expr,$3.u_expr);
+            }
+            |expression ADD expression
+            {
+                $$.u_expr=new Plus($1.u_expr,$3.u_expr);
+            }
+            |expression SUB expression
+            {
+                $$.u_expr=new Minus($1.u_expr,$3.u_expr);
+            }
+            |expression MUL expression
+            {
+                $$.u_expr=new Times($1.u_expr,$3.u_expr);
+            }
+            |expression DIV expression
+            {
+                $$.u_expr=new Div($1.u_expr,$3.u_expr);
+            }
+            |expression EQL expression
+            {
+                $$.u_expr=new Compare($1.u_expr,$3.u_expr);
+            }
+            |expression NOTEQL expression
+            {
+                $$.u_expr=new Noteq($1.u_expr,$3.u_expr);
+            }
+            |expression SML expression
+            {
+                $$.u_expr=new Lt($1.u_expr,$3.u_expr);
+            }
+            |expression SMLEQL expression
+            {
+                $$.u_expr=new Lteq($1.u_expr,$3.u_expr);
+            }
+            |expression LRG expression
+            {
+                $$.u_expr=new Gt($1.u_expr,$3.u_expr);
+            }
+            |expression LRGEQL expression
+            {
+                $$.u_expr=new Gteq($1.u_expr,$3.u_expr);
+            }
+            |'('expression')'
+            {
+                $$.u_expr=$2.u_expr;
+            }
+            |IDENTIFIER '[' expression ']' /*s[7+1]*/
+            {
+                $$.u_expr=new ArrayAccess(new SymName($1.u_base_charptr),$3.u_expr);
+            }
+            |IDENTIFIER
+            {
+                $$.u_expr=new Ident(new SymName($1.u_base_charptr));
+            }
+            |INTEGER_LITERAL
+            {
+                $$.u_expr=new IntLit(new Primitive($1.u_base_int));
+            }
+            |CHAR_LITERAL
+            {
+                $$.u_expr=new CharLit(new Primitive($1.u_base_int));
+            }
+            |TF
+            {
+                $$.u_expr=new BoolLit(new Primitive($1.u_base_int));
+            }
+            |'|' expression '|'     /*|3 +5 |*/ /*|s|*/
+            {
+                $$.u_expr=new AbsoluteValue($2.u_expr);
+            }
+            |NULL_
+            {
+                $$.u_expr=new NullLit();
+            }
+            ;
+%%
+
+/** You shall not pass!
+ *  You should not  have to do or edit anything past this.
+ */
+
+extern int yylineno;
+
+void yyerror(const char *s)
+{
+    fprintf(stderr, "%s at line %d\n", s, yylineno);
+    return;
+}

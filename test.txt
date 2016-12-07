@@ -1,0 +1,6 @@
+procedure Main() return integer 
+/%note that Main now returns an integer!%/
+{
+    return 4/2+5*2;
+}
+

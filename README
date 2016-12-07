@@ -1,0 +1,20 @@
+-Project 5 - Code Generation 
+
+-Goal:
+	•	to generate x86 code from your CSimple programs
+	•	to complete the compiler so that it can produce something useful
+
+-Steps:
+	•	do slight change for the NULL pointer in "typecheck.cpp" for the bugs I made in Project 4
+	•	add my lexer, parser and typechecker of the Project 4 into Project 5, also "symtab.cpp" for the string size
+	•	read the tour of Project 5 on the class website carefully
+	•	understand x86 assembly code, especially in the AT&T syntax 
+	•	get arithmetic expressions on integers working:
+	•	get procedure calls working:
+	•	get boolean operation working
+	•	control flow:
+	•	arrays:
+	•	
+	•	go through the code in "typecheck.cpp" as a test case would do and for each error type write some code to be consistent with the tour
+	•	use some test cases to check my code and modify my code if necessary
+
